@@ -1,0 +1,111 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(Stat2Data)
+library(bestglm)
+library(corrplot)
+library(leaps)
+library(dplyr)
+library(car)
+library(ggplot2)
+library(MASS)
+heart_f= read_csv("heart_failure_clinical_records_dataset.csv")
+```
+
+Goal:
+To form a model with the best predictors of DEATH_EVENT and to test the model on a holdout set of the original data.
+
+Data Description:
+The age variables explains the age of the patient. The variable anaemia is a boolean variable that shows whether there was a decrease of red blood cells or hemoglobin. The variable creatinine_phosphokinase shows the level of CPK enzyme in the blood (mcg/L). Diabetes is a boolean variable that shows whether the patient has diabetes or not. The variable ejection_fraction shows the percentage of blood leaving the heart at each contraction (percentage). The variable high_blood_pressure is a boolean variable indicating whether or not a patient has high blood pressure. The variable platelets indicates the number of platelets in the blood (kiloplatelets/mL). The variable serum_creatinine indicates the level of serum creatinine in the blood (mEq/L). THe variable sex is a binary variable indicating woman or man. The variable smoking is a boolean variable indicating whether the patient smokes or not. The variable time indicates the follow-up period in days. The variable DEATH_EVENT is a boolean variable indicating whether the patient deceased during the follow-up period.
+
+```{r}
+head(heart_f)
+summary(heart_f)
+table(heart_f$DEATH_EVENT)
+```
+
+
+## Data Visualizations
+```{r}
+set.seed(12142020)
+rows <- sample(nrow(heart_f))
+heart_f_shuffled = heart_f[rows,]
+
+heart_f_Train=heart_f_shuffled[1:239,]       #select the training sample
+heart_f_Test=heart_f_shuffled[239:299,]   #create the holdout sample
+```
+
+After taking a look at the data set contents, I split the dataset into training data and testing data (80% and 20% respectively). I randomized the data beforehand to ensure that that there is no bias due to the order of the data set. I also set the seed to the current date to ensure that I can reproduce the same random results. 
+
+
+## Finding best model to predict survival
+```{r}
+#Starting with an empty model with no predictors
+none = glm(DEATH_EVENT~1, data=heart_f_Train, family="binomial")
+#Establish a full model
+full_heart_f = glm(DEATH_EVENT~., data=heart_f_Train, family="binomial")
+#Stepwise 
+final_model_both = stepAIC(none, scope=list(upper=full_heart_f), direction="both", trace=TRUE)
+
+summary(final_model_both)
+exp(summary(final_model_both)$coef[1])
+exp(summary(final_model_both)$coef[1]+ summary(final_model_both)$coef[3])
+```
+
+To find the best model, I used stepwise regression. After several steps, I found that the best model contains time, serum_creatinine, ejection_fraction, and age.
+
+
+##Individual Plots
+```{r}
+plot(jitter(DEATH_EVENT,.2)~time, ylim=c(-.25,1.25), data=heart_f)
+plot(jitter(DEATH_EVENT,.2)~ejection_fraction, ylim=c(-.25,1.25), data=heart_f)
+plot(jitter(DEATH_EVENT,.2)~serum_creatinine, ylim=c(-.25,1.25), data=heart_f)
+plot(jitter(DEATH_EVENT,.2)~age, ylim=c(-.25,1.25), data=heart_f)
+exp(confint.default(final_model_both))
+```
+
+I took the best predictors found using stepwise regression and individually plotted them against DEATH_EVENT on the y-axis. By doing so, I was hoping to get an idea what kind of relationship each predictor has on the outcome. Some graphs were unclear so I also plotted the confidence interval to get a more accurate idea of what predictors where decreasing the chance of survival. I found the following:
+
+For every unit you add to time, the odds of a patient passing away (DEATH_EVENT=1) are somewhere between 97.3% to 98.6% of what they were when time is one unit smaller with 95% confidence.
+
+For every unit you add to serum_creatinine, the odds of a patient passing away (DEATH_EVENT=1), is somewhere between 146.8% to 321.7% of what they were when serum_creatinine is one unit smaller with 95% confidence.
+
+For every unit you add to ejection_fraction, the odds of a patient passing away (DEATH_EVENT=1) is somewhere between 89.5% to 96.0% of what they were when ejection_fraction is one unit smaller with 95% confidence.
+
+For every unit you add to the age, the odds of a patient passing away (DEATH_EVENT=1) is somewhere between 102.1% to 109.4% of what they were when age is one unit smaller with 95% confidence.
+
+In short, longer follow-up periods (time) and a higher percentage of blood leaving the heart at each contraction (ejection_fraction) increase the chances of survival. On the other hand, higher ages (age) and a higher level of serum creatinine (serum_creatinine) decrease the chances of survival. 
+
+
+## Checking correlation among predictors
+```{r}
+heart_cor_matrix= cor(heart_f[,c(1,5,8,12)])
+corrplot(heart_cor_matrix, type="upper")
+vif(final_model_both)
+```
+
+The VIFs are low enough to say that there is not much correlation among predictors. I included a visual to show the lack of correlation.
+
+## Looking at Residuals
+```{r}
+heart_f_Test$Predicted=predict(final_model_both, heart_f_Test, type="response")
+heart_f_Test$BooleanPred = ifelse(heart_f_Test$Predicted < .5, 0, 1)
+
+CorrectPredictionPercentage=sum(heart_f_Test$DEATH_EVENT == heart_f_Test$BooleanPred)/61
+CorrectPredictionPercentage
+```
+
+After looking at the relationship between the predictor and the response variables in the testing, I used the model to predict DEATH_EVENT for the test data set. I then created a column in the test data set to show the predicted values for each row. Since the predicted values were not binary, I created a new column using an ifelse statement. If the predicted values were less than .5, the new column indicated a 0. If the predicted values were greater than or equal to .5, the new column indicated a 1. I think compared the predicted values with the actual values of DEATH_EVENT. The model predicted the actual outcome 82% of the time. 
+
+## Predicting the survival of a hypothetical individual
+```{r}
+newx=data.frame(time=mean(heart_f$time), serum_creatinine=mean(heart_f$serum_creatinine), ejection_fraction=mean(heart_f$ejection_fraction), 
+    age=mean(heart_f$age))
+predict.glm(final_model_both, newx, type="response")
+```
+
+Here, I created a hypothetical situation. For all of the significant predictors, I took the mean values from the original dataset and created a new data frame. I then used the predict function to predict the survival of the hypothetical individual. This predicted value for the hypothetical individual is .214. This rounds down to a 0 (which translates to survival). This output makes sense because a majority of the people in the data set survived (203 compared to 96). 
